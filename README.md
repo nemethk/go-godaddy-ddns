@@ -1,1 +1,3 @@
 # go-godaddy-ddns
+
+The code is currently under development...
