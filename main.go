@@ -9,6 +9,7 @@ import (
     "log"
     "net/http"
     "time"
+    "go-godaddy-ddns/slack"
 )
 
 // globals
@@ -16,23 +17,29 @@ var GODADDY_KEY = ""
 var GODADDY_SECRET = ""
 var GODADDY_DOMAIN = ""
 var IP_PROVIDER = ""
+var BEARER_TOKEN = ""
+var CHANNEL_ID = ""
 
 func main() {
 
     // required
     ptrGodaddyKey := flag.String("godaddy-key", "", "Godaddy API key")
     ptrGodaddySecret := flag.String("godaddy-secret", "", "Godaddy API secret")
-    ptrGodaddyDomain := flag.String("godaddy-domain", "", "Registered domain name")
+    ptrGodaddyDomain := flag.String("godaddy-domain", "", "The registered domain name")
+    ptrBearerToken := flag.String("slack-token", "", "Slack Bearer token")
+    ptrChannelId := flag.String("channel-id", "", "Slack channel ID")
 
     // optional
-    POLLING_INTERVAL := flag.Int("polling-interval", 10, "Polling interval in seconds")
-    ptrIpProvider := flag.String("ip-provider", "https://v4.ident.me/", "IP provider API")
+    //POLLING_INTERVAL := flag.Int("polling-interval", 10, "Polling interval in seconds")
+    ptrIpProvider := flag.String("ip-provider", "https://v4.ident.me/", "IP provider API.")
 
     flag.Parse()
     GODADDY_KEY = *ptrGodaddyKey
     GODADDY_SECRET = *ptrGodaddySecret
     GODADDY_DOMAIN = *ptrGodaddyDomain
     IP_PROVIDER = *ptrIpProvider
+    BEARER_TOKEN = *ptrBearerToken
+    CHANNEL_ID = *ptrChannelId
 
     // is it specified
     verifyVar(GODADDY_KEY, "Specify the GoDaddy API key")
@@ -43,9 +50,9 @@ func main() {
     NOW := time.Now()
     fmt.Printf("START \nINFO - Current time is: %s\n", NOW.Format("2006-01-02 15:04:05 Monday"))
     // check IP
-    compareCurrentAndDomainIP(GODADDY_KEY, GODADDY_SECRET, GODADDY_DOMAIN, IP_PROVIDER)
+    compareCurrentAndDomainIP(GODADDY_KEY, GODADDY_SECRET, GODADDY_DOMAIN, IP_PROVIDER, BEARER_TOKEN, CHANNEL_ID)
     // sleep
-    time.Sleep(time.Second * time.Duration(*POLLING_INTERVAL))
+    //time.Sleep(time.Second * time.Duration(*POLLING_INTERVAL))
     //}
 }
 
@@ -84,7 +91,7 @@ func getDomainIP(GODADDY_KEY string, GODADDY_SECRET string, GODADDY_DOMAIN strin
     return jsonData[0].Data, nil
 }
 
-func compareCurrentAndDomainIP(GODADDY_KEY string, GODADDY_SECRET string, GODADDY_DOMAIN string, IP_PROVIDER string) {
+func compareCurrentAndDomainIP(GODADDY_KEY string, GODADDY_SECRET string, GODADDY_DOMAIN string, IP_PROVIDER string, BEARER_TOKEN string, CHANNEL_ID string) {
     // current IP
     CURRENT_IP, err := getCurrentIP(IP_PROVIDER)
     errMsg(err)
@@ -97,7 +104,7 @@ func compareCurrentAndDomainIP(GODADDY_KEY string, GODADDY_SECRET string, GODADD
 
     if CURRENT_IP != DOMAIN_IP {
         fmt.Println("INFO - The IP is different!")
-        RESPONSE, err := putDomainIP(CURRENT_IP, GODADDY_KEY, GODADDY_SECRET, GODADDY_DOMAIN)
+        RESPONSE, err := putDomainIP(CURRENT_IP, GODADDY_KEY, GODADDY_SECRET, GODADDY_DOMAIN, BEARER_TOKEN, CHANNEL_ID)
         errMsg(err)
         fmt.Printf(RESPONSE)
     } else {
@@ -111,7 +118,7 @@ func errMsg(ERR error) {
     }
 }
 
-func putDomainIP(CURRENT_IP string, GODADDY_KEY string, GODADDY_SECRET string, GODADDY_DOMAIN string) (string, error) {
+func putDomainIP(CURRENT_IP string, GODADDY_KEY string, GODADDY_SECRET string, GODADDY_DOMAIN string, BEARER_TOKEN string, CHANNEL_ID string) (string, error) {
 
     type Data struct {
         Data string `json:"data"`
@@ -124,6 +131,7 @@ func putDomainIP(CURRENT_IP string, GODADDY_KEY string, GODADDY_SECRET string, G
         },
     })
     requestBody := bytes.NewBuffer(jsonData)
+    var MESSAGE string = ""
     //fmt.Println(requestBody)
     request, err := http.NewRequest("PUT",
         fmt.Sprintf("https://api.godaddy.com/v1/domains/%s/records/A/@", GODADDY_DOMAIN),
@@ -163,8 +171,12 @@ func putDomainIP(CURRENT_IP string, GODADDY_KEY string, GODADDY_SECRET string, G
         return "", err
     }
     if response.StatusCode == 200 {
+        MESSAGE = fmt.Sprintf("The new IP (%s) has been successfuly set.", CURRENT_IP)
+        slack.SlackPost(BEARER_TOKEN, CHANNEL_ID, MESSAGE)
         return "INFO - Success!", nil
     } else {
+        MESSAGE = fmt.Sprintf("Failed to set the new IP (%s).", CURRENT_IP)
+        slack.SlackPost(BEARER_TOKEN, CHANNEL_ID, MESSAGE)
         return "", errors.New(fmt.Sprintf("ERROR - HTTP status code %d\n", response.StatusCode))
     }
 }
